@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>ARIA + SENTINEL State Diagrams</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@300;400;600;700&display=swap');
+
+  :root {
+    --bg:     #080810;
+    --panel:  #0f0f18;
+    --border: #1e1e2e;
+    --lime:   #a3e635;
+    --green:  #4ade80;
+    --blue:   #60a5fa;
+    --yellow: #facc15;
+    --red:    #f87171;
+    --purple: #c084fc;
+    --dim:    #4a4a5a;
+    --text:   #e2e8f0;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    padding: 40px 32px;
+  }
+
+  h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--lime);
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 48px;
+  }
+  .subtitle span { color: var(--lime); }
+
+  .section {
+    margin-bottom: 56px;
+  }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--lime), transparent);
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .card-title .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    background: var(--lime);
+    color: #000;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .card-desc {
+    font-size: 12px;
+    color: var(--dim);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .mermaid {
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Override mermaid SVG text to match theme */
+  .mermaid svg {
+    font-family: 'JetBrains Mono', monospace !important;
+    max-width: 100%;
+  }
+</style>
+</head>
+<body>
+
+<h1>State Diagrams</h1>
+<div class="subtitle">ARIA Rover + <span>SENTINEL</span></div>
+
+<!-- ══════════════════════════════════════════════════════════
+     1. SENTINEL Connection State Machine
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">01 — SENTINEL Connection State Machine</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">STATE</span> SENTINEL ↔ Jetson TCP</div>
+    <div class="card-desc">State machine for the TCP connection between SENTINEL on PC and the bridge_node.py on the Jetson. Managed by connection_operations.rs and data_operations.rs.</div>
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> OFFLINE : app launch
+
+    OFFLINE --> CONNECTING : user clicks Connect\n(IP + port entered)
+    CONNECTING --> ONLINE : TCP handshake success\nstart_rover_stream()
+    CONNECTING --> OFFLINE : connection refused\nor timeout
+    ONLINE --> STREAMING : rover-packet event\nreceived
+    STREAMING --> STREAMING : packet every 50ms\n(20Hz)
+    STREAMING --> ONLINE : no packets\n(bridge paused)
+    ONLINE --> OFFLINE : disconnect_rover()\nor rover-disconnected event
+    STREAMING --> OFFLINE : disconnect_rover()\nor rover-disconnected event
+    OFFLINE --> [*] : app close
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     2. ARIA Boot Sequence
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">02 — ARIA Full Boot Sequence</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">SEQUENCE</span> Power-on to Telemetry</div>
+    <div class="card-desc">From powering on the rover to live data appearing in SENTINEL. Shows all nodes and the handshake between ESP32 and the Jetson micro-ROS agent.</div>
+    <div class="mermaid">
+sequenceDiagram
+    participant ESP32
+    participant Agent as micro-ROS Agent<br/>(Jetson)
+    participant EKF as robot_localization<br/>EKF
+    participant Bridge as bridge_node.py
+    participant SENTINEL
+
+    Note over ESP32,SENTINEL: aria_bringup.sh starts tmux session
+
+    Agent->>ESP32: serial open /dev/ttyUSB0
+    ESP32->>Agent: XRCE-DDS session request
+    Agent->>ESP32: session established
+    Note over ESP32,Agent: ~3-4s handshake delay
+
+    ESP32->>Agent: create publishers\n(/odom, /imu/data, /tof/left, /tof/right)
+    ESP32->>Agent: create subscriber\n(/cmd_vel)
+
+    Agent->>EKF: /odom @ 7Hz
+    Agent->>EKF: /imu/data @ 7Hz
+    EKF->>Bridge: /odometry/filtered @ 30Hz
+
+    Bridge->>SENTINEL: TCP :9999 JSON stream @ 20Hz
+
+    SENTINEL->>Bridge: TCP connect
+    Bridge->>SENTINEL: {"id":1, "pos_x":0.0 ...}
+    Note over SENTINEL: LINK → ONLINE\nmap starts drawing
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     3. ESP32 micro-ROS Node State
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">03 — ESP32 micro-ROS State Machine</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">STATE</span> ESP32 Firmware Lifecycle</div>
+    <div class="card-desc">Internal state of the ESP32 micro-ROS node from boot to active publishing. The 15-second delay before /cmd_vel responds is caused by the WAITING_FOR_AGENT → AGENT_CONNECTED transition.</div>
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> BOOT : power on
+
+    BOOT --> INIT_HARDWARE : setup motors\nIMU · encoders · ToF
+    INIT_HARDWARE --> WAITING_FOR_AGENT : hardware ready\nstart micro-ROS transport
+
+    WAITING_FOR_AGENT --> WAITING_FOR_AGENT : ping agent\nevery 500ms
+    WAITING_FOR_AGENT --> AGENT_CONNECTED : agent responds\nsession created
+
+    AGENT_CONNECTED --> CREATING_ENTITIES : create publishers\n+ subscriber
+    CREATING_ENTITIES --> AGENT_AVAILABLE : all entities created\n/odom /imu /tof /cmd_vel
+
+    AGENT_AVAILABLE --> SPINNING : enter main loop
+
+    SPINNING --> SPINNING : publish /odom @ 7Hz\npublish /imu/data @ 7Hz\npublish /tof/left /tof/right\nreceive /cmd_vel → drive motors
+
+    SPINNING --> WAITING_FOR_AGENT : agent disconnect\nor serial error
+
+    note right of WAITING_FOR_AGENT
+        This is why cmd_vel has
+        ~15s delay on first connect
+        — agent must re-establish
+    end note
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     4. Data Pipeline Flowchart
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">04 — Sensor Data Pipeline</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">FLOW</span> Raw Sensor → SENTINEL Display</div>
+    <div class="card-desc">How raw sensor readings from the ESP32 travel through the ROS2 stack and arrive as rendered data in SENTINEL.</div>
+    <div class="mermaid">
+flowchart TD
+    A([BMI160 IMU\nhardware]) -->|SPI| B[ESP32 firmware\nreads raw accel/gyro]
+    C([Wheel Encoders\nhardware]) -->|GPIO pulses| D[ESP32 firmware\ncounts ticks → velocity]
+
+    B --> E[micro-ROS publisher\nsensor_msgs/Imu\n/imu/data @ 7Hz]
+    D --> F[micro-ROS publisher\nnav_msgs/Odometry\n/odom @ 7Hz]
+
+    E -->|USB serial XRCE-DDS| G[micro-ROS Agent\nJetson Nano]
+    F -->|USB serial XRCE-DDS| G
+
+    G -->|ROS2 DDS| H[robot_localization\nEKF node]
+    H -->|/odometry/filtered\n30Hz fused pose| I[bridge_node.py]
+    E -->|/imu/data| I
+
+    J([OAK-D Lite]) -->|USB3| K[depthai-ros node\n/color/image_raw\n/stereo/depth]
+    K --> L[rtabmap_ros\nSLAM + loop closure]
+    L -->|/map /tf| M[Nav2 stack]
+
+    I -->|JSON over TCP\nWiFi :9999| N[SENTINEL\nRust TCP client]
+
+    N --> O[Tauri event\nrover-packet]
+    O --> P[React state\nlatestPacket]
+
+    P --> Q[RoverMap\n2D path]
+    P --> R[Orientation\n3D model]
+    P --> S[WheelSpeeds\nRPM gauges]
+    P --> T[Graphs\nvel/accel/rot]
+
+    style A fill:#1a1a2e,stroke:#facc15,color:#facc15
+    style C fill:#1a1a2e,stroke:#facc15,color:#facc15
+    style J fill:#1a1a2e,stroke:#c084fc,color:#c084fc
+    style G fill:#1a2a3e,stroke:#60a5fa,color:#60a5fa
+    style H fill:#1a2e1a,stroke:#4ade80,color:#4ade80
+    style I fill:#1a2e1a,stroke:#a3e635,color:#a3e635
+    style N fill:#2e1a1a,stroke:#a3e635,color:#a3e635
+    style Q fill:#0f1a0f,stroke:#4ade80,color:#4ade80
+    style R fill:#0f1a0f,stroke:#4ade80,color:#4ade80
+    style S fill:#0f1a0f,stroke:#4ade80,color:#4ade80
+    style T fill:#0f1a0f,stroke:#4ade80,color:#4ade80
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     5. Nav2 / Autonomous Navigation State
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">05 — Autonomous Navigation State Machine</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">STATE</span> Nav2 Behavior</div>
+    <div class="card-desc">State machine for ARIA's autonomous navigation using Nav2. Relevant for the IEEE Mining Mayhem competition where ARIA needs to navigate autonomously.</div>
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> IDLE : system ready\nmap loaded
+
+    IDLE --> LOCALIZING : receive goal pose\nfrom operator / mission
+
+    LOCALIZING --> PLANNING : AMCL pose\nestimated
+
+    PLANNING --> EXECUTING : global path\ncomputed by NavFn
+
+    EXECUTING --> EXECUTING : local DWB planner\nadjusts cmd_vel\navoiding obstacles
+
+    EXECUTING --> OBSTACLE_DETECTED : ToF sensor\nor costmap hit
+
+    OBSTACLE_DETECTED --> RECOVERING : Nav2 recovery\nbehavior triggered
+
+    RECOVERING --> EXECUTING : obstacle cleared\nresume path
+
+    RECOVERING --> FAILED : max retries\nexceeded
+
+    EXECUTING --> GOAL_REACHED : within tolerance\nof goal pose
+
+    GOAL_REACHED --> IDLE : mission complete\nor next waypoint
+
+    FAILED --> IDLE : operator reset
+
+    note right of EXECUTING
+        /cmd_vel published by Nav2
+        ESP32 receives via micro-ROS
+        SENTINEL shows wheel RPMs
+        updating in real time
+    end note
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     6. RTAB-Map SLAM State
+══════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">06 — RTAB-Map SLAM State Machine</div>
+  <div class="card">
+    <div class="card-title"><span class="tag">STATE</span> SLAM Mapping Lifecycle</div>
+    <div class="card-desc">How RTAB-Map builds and maintains the map using the OAK-D Lite RGB-D camera and EKF odometry. Loop closure is key for correcting drift.</div>
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> INITIALIZING : rtabmap_ros node start\nwaiting for camera + odom
+
+    INITIALIZING --> MAPPING : first RGB-D frame\n+ odometry received
+
+    MAPPING --> MAPPING : add node to graph\nevery 1s or 0.5m moved\nextract visual features
+
+    MAPPING --> LOOP_CLOSURE_CHECK : new node added\nsearch for similar\npast nodes
+
+    LOOP_CLOSURE_CHECK --> MAPPING : no match found\ncontinue mapping
+
+    LOOP_CLOSURE_CHECK --> LOOP_CLOSURE_DETECTED : visual similarity\nabove threshold
+
+    LOOP_CLOSURE_DETECTED : Loop Closure Detected
+    LOOP_CLOSURE_DETECTED --> GRAPH_OPTIMIZATION : optimize pose graph\ncorrect accumulated drift
+
+    GRAPH_OPTIMIZATION --> MAPPING : updated /map published\nto Nav2 + SENTINEL
+
+    MAPPING --> LOCALIZATION_ONLY : map saved\nswitch to localization mode
+
+    LOCALIZATION_ONLY --> LOCALIZATION_ONLY : localize against\nsaved map\nno new nodes added
+
+    note right of LOOP_CLOSURE_DETECTED
+        This is what fixes drift
+        on the odometry map in
+        SENTINEL over long runs
+    end note
+    </div>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1a1a2e',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#a3e635',
+      lineColor: '#4ade80',
+      secondaryColor: '#0f0f18',
+      tertiaryColor: '#0f0f18',
+      background: '#080810',
+      mainBkg: '#0f0f18',
+      nodeBorder: '#1e1e2e',
+      clusterBkg: '#0f0f18',
+      titleColor: '#a3e635',
+      edgeLabelBackground: '#0f0f18',
+      activeTaskBorderColor: '#a3e635',
+      activeTaskBkgColor: '#1a2e1a',
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: '13px',
+    },
+    flowchart: { curve: 'basis', htmlLabels: true },
+    sequence: { actorMargin: 80, messageMargin: 40 },
+  });
+</script>
+</body>
+</html>
